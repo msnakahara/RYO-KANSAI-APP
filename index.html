@@ -214,8 +214,29 @@ textarea{resize:vertical; min-height:70px;}
 <body>
 <div id="app"></div>
 
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
 <script>
+const FIREBASE_CONFIG = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+let db = null;
+let cloudEnabled = false;
+try{
+  if(FIREBASE_CONFIG.apiKey && typeof firebase !== "undefined"){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    cloudEnabled = true;
+  }
+}catch(e){ console.error("firebase init failed", e); cloudEnabled = false; }
+const AUDITS_COLLECTION = "dorm_audits";
+
 const MALE_ITEMS = [
 ["玄関床","Entrance Floor","Sahig ng Pasukan"],["下駄箱","Shoe Box","Estante ng Sapatos"],["喫煙所","Smoking Area","Lugar Panigarilyo"],
 ["キッチンの床","Kitchen Floor","Sahig ng Kusina"],["IHコンロ","IH Stove","IH Kalan"],["シンク、生ごみ","Kitchen Sink / Waste","Lababo ng Kusina / Basura"],
@@ -452,9 +473,13 @@ async function completeAudit(){
     createdAt: Date.now()
   };
   try{
-    await storageAPI.set("audit:"+id, JSON.stringify(record));
-    const meta = {id, date:f.date, inspector:record.inspector, dormName:f.dormName, rank:stats.rank, rankLabel:stats.rankLabel, avg:stats.avg, warn:stats.warn, createdAt: record.createdAt};
-    await storageAPI.set("meta:"+id, JSON.stringify(meta));
+    if(cloudEnabled){
+      await db.collection(AUDITS_COLLECTION).doc(id).set(record);
+    }else{
+      await storageAPI.set("audit:"+id, JSON.stringify(record));
+      const meta = {id, date:f.date, inspector:record.inspector, dormName:f.dormName, rank:stats.rank, rankLabel:stats.rankLabel, avg:stats.avg, warn:stats.warn, createdAt: record.createdAt};
+      await storageAPI.set("meta:"+id, JSON.stringify(meta));
+    }
     toast("監査結果を保存しました");
     state.detailId = id;
     state.view = "detail";
@@ -470,6 +495,15 @@ let historyCache = null;
 async function loadHistory(force){
   if(historyCache && !force) return historyCache;
   try{
+    if(cloudEnabled){
+      const snap = await db.collection(AUDITS_COLLECTION).orderBy("createdAt","desc").get();
+      const metas = snap.docs.map(d=>{
+        const v = d.data();
+        return {id:d.id, date:v.date, inspector:v.inspector, dormName:v.dormName, rank:v.stats.rank, rankLabel:v.stats.rankLabel, avg:v.stats.avg, warn:v.stats.warn, createdAt:v.createdAt};
+      });
+      historyCache = metas;
+      return metas;
+    }
     const list = await storageAPI.list("meta:");
     if(!list || !list.keys){ historyCache = []; return historyCache; }
     const metas = [];
@@ -503,8 +537,12 @@ async function confirmDelete(){
   const id = state.pendingDelete;
   if(!id) return;
   try{
-    await storageAPI.delete("audit:"+id);
-    await storageAPI.delete("meta:"+id);
+    if(cloudEnabled){
+      await db.collection(AUDITS_COLLECTION).doc(id).delete();
+    }else{
+      await storageAPI.delete("audit:"+id);
+      await storageAPI.delete("meta:"+id);
+    }
     historyCache = null;
     state.pendingDelete = null;
     state.view = "history";
@@ -711,9 +749,15 @@ async function loadDetailContent(){
   const holder = document.getElementById("detailContent");
   if(!holder) return;
   try{
-    const r = await storageAPI.get("audit:"+id);
-    if(!r || !r.value){ holder.innerHTML = "<p>記録が見つかりません。</p>"; return; }
-    const record = JSON.parse(r.value);
+    let record = null;
+    if(cloudEnabled){
+      const doc = await db.collection(AUDITS_COLLECTION).doc(id).get();
+      if(doc.exists){ record = doc.data(); record.id = id; }
+    }else{
+      const r = await storageAPI.get("audit:"+id);
+      if(r && r.value) record = JSON.parse(r.value);
+    }
+    if(!record){ holder.innerHTML = "<p>記録が見つかりません。</p>"; return; }
     holder.innerHTML = renderReportBody(record) + `
       <button class="ghost-btn" style="color:var(--danger);border-color:var(--danger);" onclick="requestDelete('${id}')">この記録を削除する</button>
     `;
@@ -878,6 +922,7 @@ function render(){
     <div class="top">
       <h1>寮 定期監査チェックシート</h1>
       <p>◎良好 ／ 〇普通 ／ △要改善 で選んで写真を撮るだけ</p>
+      <p style="margin-top:4px;">${cloudEnabled? "☁️ 全員の記録を共有中":"⚠️ この端末のみに保存中（クラウド未設定）"}</p>
     </div>
     ${renderTabs()}
     ${body}
