@@ -237,6 +237,25 @@ try{
 }catch(e){ console.error("firebase init failed", e); cloudEnabled = false; }
 const AUDITS_COLLECTION = "dorm_audits";
 
+// Googleスプレッドシートに全員分をまとめたい場合はここにApps Script Webアプリの URL を貼り付けてください。
+// 空欄のままなら、この機能は使われません（従来通りの保存のみ）。
+const SHEET_WEBAPP_URL = "";
+
+async function sendToSheet(record){
+  if(!SHEET_WEBAPP_URL) return;
+  try{
+    await fetch(SHEET_WEBAPP_URL, {
+      method: "POST",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify(record)
+    });
+  }catch(e){
+    console.error("sheet send error", e);
+    toast("スプレッドシートへの送信に失敗しました（記録自体は保存済みです）");
+  }
+}
+
+
 const MALE_ITEMS = [
 ["玄関床","Entrance Floor","Sahig ng Pasukan"],["下駄箱","Shoe Box","Estante ng Sapatos"],["喫煙所","Smoking Area","Lugar Panigarilyo"],
 ["キッチンの床","Kitchen Floor","Sahig ng Kusina"],["IHコンロ","IH Stove","IH Kalan"],["シンク、生ごみ","Kitchen Sink / Waste","Lababo ng Kusina / Basura"],
@@ -480,6 +499,7 @@ async function completeAudit(){
       const meta = {id, date:f.date, inspector:record.inspector, dormName:f.dormName, rank:stats.rank, rankLabel:stats.rankLabel, avg:stats.avg, warn:stats.warn, createdAt: record.createdAt};
       await storageAPI.set("meta:"+id, JSON.stringify(meta));
     }
+    if(SHEET_WEBAPP_URL) sendToSheet(record);
     toast("監査結果を保存しました");
     state.detailId = id;
     state.view = "detail";
@@ -922,7 +942,7 @@ function render(){
     <div class="top">
       <h1>寮 定期監査チェックシート</h1>
       <p>◎良好 ／ 〇普通 ／ △要改善 で選んで写真を撮るだけ</p>
-      <p style="margin-top:4px;">${cloudEnabled? "☁️ 全員の記録を共有中":"⚠️ この端末のみに保存中（クラウド未設定）"}</p>
+      <p style="margin-top:4px;">${cloudEnabled? "☁️ 全員の記録を共有中（Firebase）" : (SHEET_WEBAPP_URL? "📊 スプレッドシートに全員分を記録中" : "⚠️ この端末のみに保存中（未設定）")}</p>
     </div>
     ${renderTabs()}
     ${body}
