@@ -255,6 +255,15 @@ async function sendToSheet(record){
   }
 }
 
+const RANK_LABEL_TO_LETTER = {"非常に良好":"A","良好":"B","要注意":"C","要改善":"D"};
+
+async function fetchSheetRecords(){
+  const res = await fetch(SHEET_WEBAPP_URL, {method:"GET"});
+  const data = await res.json();
+  if(data.status !== "ok") throw new Error(data.message || "sheet fetch failed");
+  return data.records || [];
+}
+
 
 const MALE_ITEMS = [
 ["玄関床","Entrance Floor","Sahig ng Pasukan"],["下駄箱","Shoe Box","Estante ng Sapatos"],["喫煙所","Smoking Area","Lugar Panigarilyo"],
@@ -519,8 +528,19 @@ async function loadHistory(force){
       const snap = await db.collection(AUDITS_COLLECTION).orderBy("createdAt","desc").get();
       const metas = snap.docs.map(d=>{
         const v = d.data();
-        return {id:d.id, date:v.date, inspector:v.inspector, dormName:v.dormName, rank:v.stats.rank, rankLabel:v.stats.rankLabel, avg:v.stats.avg, warn:v.stats.warn, createdAt:v.createdAt};
+        return {id:d.id, source:"firebase", date:v.date, inspector:v.inspector, dormName:v.dormName, rank:v.stats.rank, rankLabel:v.stats.rankLabel, avg:v.stats.avg, warn:v.stats.warn, createdAt:v.createdAt};
       });
+      historyCache = metas;
+      return metas;
+    }
+    if(SHEET_WEBAPP_URL){
+      const records = await fetchSheetRecords();
+      const metas = records.map(r=>({
+        id:r.id, source:"sheet", raw:r,
+        date:r.date, inspector:r.inspector, dormName:r.dormName,
+        rank:RANK_LABEL_TO_LETTER[r.rankLabel]||"D", rankLabel:r.rankLabel,
+        avg:r.avg, warn:r.warn, createdAt:r.timestamp
+      }));
       historyCache = metas;
       return metas;
     }
@@ -530,7 +550,7 @@ async function loadHistory(force){
     for(const k of list.keys){
       try{
         const r = await storageAPI.get(k);
-        if(r && r.value) metas.push(JSON.parse(r.value));
+        if(r && r.value) metas.push({...JSON.parse(r.value), source:"local"});
       }catch(e){}
     }
     metas.sort((a,b)=>b.createdAt-a.createdAt);
@@ -769,6 +789,13 @@ async function loadDetailContent(){
   const holder = document.getElementById("detailContent");
   if(!holder) return;
   try{
+    if(SHEET_WEBAPP_URL && !cloudEnabled){
+      const metas = await loadHistory(false);
+      const meta = metas.find(m=>m.id===id);
+      if(!meta){ holder.innerHTML = "<p>記録が見つかりません。</p>"; return; }
+      holder.innerHTML = renderSheetDetail(meta.raw);
+      return;
+    }
     let record = null;
     if(cloudEnabled){
       const doc = await db.collection(AUDITS_COLLECTION).doc(id).get();
@@ -785,6 +812,44 @@ async function loadDetailContent(){
     console.error(e);
     holder.innerHTML = "<p>読み込みに失敗しました。</p>";
   }
+}
+
+function renderSheetDetail(r){
+  const rank = RANK_LABEL_TO_LETTER[r.rankLabel] || "D";
+  const itemLines = (r.itemSummary||"").split("\n").filter(Boolean);
+  const flagLines = (r.flagSummary||"").split("\n").filter(Boolean);
+  const photos = r.photoLinks || [];
+  return `
+  <div class="card">
+    <div class="summary-header">
+      <span class="badge-rank ${rankClass(rank)}">${r.rankLabel}</span>
+      <div class="score">${r.avg}<span> / 100 点</span></div>
+      <div style="font-size:12px;color:var(--ink-soft);">${r.dormName}｜${r.date}｜実施者: ${r.inspector}</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="n" style="color:var(--good-ink)">${r.good}</div><div class="l">◎ 良好</div></div>
+      <div class="stat-box"><div class="n" style="color:var(--ok-ink)">${r.ok}</div><div class="l">〇 普通</div></div>
+      <div class="stat-box"><div class="n" style="color:var(--warn-ink)">${r.warn}</div><div class="l">△ 要改善</div></div>
+    </div>
+  </div>
+  ${flagLines.length? `
+  <div class="card">
+    <h2>要改善項目（△）</h2>
+    ${flagLines.map(l=>`<div class="flag-item"><div class="t">${l}</div></div>`).join("")}
+  </div>`:""}
+  ${photos.length? `
+  <div class="card">
+    <h2>写真</h2>
+    <div class="imgs" style="display:flex;flex-wrap:wrap;gap:8px;">
+      ${photos.map(p=>`<a href="${p}" target="_blank"><img src="${p}" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line-strong);"></a>`).join("")}
+    </div>
+  </div>`:""}
+  ${r.comment? `<div class="card"><h2>全体コメント</h2><p style="font-size:13px;line-height:1.6;margin:0;">${r.comment}</p></div>`:""}
+  <div class="card">
+    <h2>全項目一覧</h2>
+    <p style="font-size:12px;line-height:1.9;white-space:pre-wrap;margin:0;">${itemLines.join("\n")}</p>
+  </div>
+  <p class="small-note">この記録はスプレッドシートから読み込んでいます。削除・PowerPoint出力はスプレッドシート側で行ってください。</p>`;
 }
 
 function renderHistory(){
