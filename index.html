@@ -239,7 +239,7 @@ const AUDITS_COLLECTION = "dorm_audits";
 
 // Googleスプレッドシートに全員分をまとめたい場合はここにApps Script Webアプリの URL を貼り付けてください。
 // 空欄のままなら、この機能は使われません（従来通りの保存のみ）。
-const SHEET_WEBAPP_URL = "";
+const SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzcut2VTrMjHOyxbAwEZX1gNR4EGmJH7GCT2dI_kfpYA0RcrP5kuKmLVE-Q-9CjBdKgeQ/exec";
 
 async function sendToSheet(record){
   if(!SHEET_WEBAPP_URL) return;
@@ -957,5 +957,3 @@ render();
 </script>
 </body>
 </html>
-
-SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzcut2VTrMjHOyxbAwEZX1gNR4EGmJH7GCT2dI_kfpYA0RcrP5kuKmLVE-Q-9CjBdKgeQ/exec"
